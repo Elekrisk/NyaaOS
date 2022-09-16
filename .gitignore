@@ -1,6 +1,5 @@
 bios.bin
 disk.img
-disk.img.sfdisk
 .vscode/
 bootloader/obj
 bootloader/bootloader.*

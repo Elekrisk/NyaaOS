@@ -1,0 +1,9 @@
+label: gpt
+label-id: 8E2EDBF3-8B32-4000-A72B-288FA34D0DB9
+device: /dev/loop1
+unit: sectors
+first-lba: 34
+last-lba: 1048542
+sector-size: 512
+
+/dev/loop1p1 : start=        2048, size=     1046495, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, uuid=410396B0-6EFC-6941-B734-448F6306FA13
