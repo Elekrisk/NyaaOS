@@ -22,3 +22,8 @@ bootloader/obj/%.o: bootloader/src/%.c
 
 run: all
 	qemu-system-x86_64 -enable-kvm -bios bios.bin disk.img
+
+clean:
+	-rm disk.img
+	-rm -r bootloader/obj
+	-rm -r boorloader/bootloader.*
