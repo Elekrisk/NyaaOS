@@ -2,25 +2,38 @@
 
 set -e
 
-losetup -a | grep "$(pwd)/disk.img" | cut -d':' -f1 | xargs -r sudo losetup -d
+if [ "${1:-nope}" = "debug" ]
+then
+    DISK=disk-debug.img
+    EFI=bootloader/bootloader-debug.efi
+# shellcheck disable=SC2037
+    SUDO="sudo -S"
+else
+    DISK=disk.img
+    EFI=bootloader/bootloader.efi
+    SUDO=sudo
+fi
 
-dd if=/dev/zero of=disk.img bs=1M count=512
-parted disk.img mklabel gpt
-sudo losetup -f disk.img
-LOOPBACK=$(losetup -a | grep "$(pwd)/disk.img" | cut -d':' -f1 | head -n1)
+losetup -a | grep "$(pwd)/$DISK" | cut -d':' -f1 | xargs -r $SUDO losetup -d
+
+dd if=/dev/zero of=$DISK bs=1M count=512
+parted $DISK mklabel gpt
+$SUDO losetup -f $DISK
+LOOPBACK=$(losetup -a | grep "$(pwd)/$DISK" | cut -d':' -f1 | head -n1)
 
 # shellcheck disable=SC2024
-sudo sfdisk "$LOOPBACK" < disk.img.sfdisk
-sudo partprobe "$LOOPBACK"
+$SUDO sfdisk "$LOOPBACK" < disk.img.sfdisk
+$SUDO partprobe "$LOOPBACK"
 
-sudo mkfs.fat -F 32 "${LOOPBACK}p1"
+$SUDO mkfs.fat -F 32 "${LOOPBACK}p1"
 
-mkdir mnt
-sudo mount "${LOOPBACK}p1" mnt
-sudo mkdir -p mnt/efi/boot
-sudo cp bootloader/bootloader.efi mnt/efi/boot/bootx64.efi
+$SUDO mkdir -p mnt
+$SUDO mount "${LOOPBACK}p1" mnt
+$SUDO mkdir -p mnt/efi/boot
+$SUDO cp "$EFI" mnt/efi/boot/bootx64.efi
+$SUDO cp kernel/kernel.elf mnt/kernel.elf
 
-sudo umount mnt
+$SUDO umount mnt
 rmdir mnt
 
-losetup -a | grep "$(pwd)/disk.img" | cut -d':' -f1 | xargs sudo losetup -d
+losetup -a | grep "$(pwd)/$DISK" | cut -d':' -f1 | xargs $SUDO losetup -d

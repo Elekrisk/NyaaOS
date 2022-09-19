@@ -1,5 +1,10 @@
 bios.bin
 disk.img
+disk-debug.img
 .vscode/
 bootloader/obj
 bootloader/bootloader.*
+bootloader/bootloader-debug.*
+kernel/obj
+kernel/kernel.*
+log
