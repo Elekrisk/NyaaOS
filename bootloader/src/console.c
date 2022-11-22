@@ -1567,12 +1567,14 @@ uint8_t glyphs[128][8] = {
 
 // clang-format on 
 
+uint16_t buffer[64][128];
 
 
 int cursor_x = 0;
 int cursor_y = 0;
 
 void clear(void) {
+    memset((void*)buffer, 0, 64 * 128 * sizeof(uint16_t));
     memset((void*)config.address, 0, config.height * config.pitch * sizeof(uint32_t));
 }
 
@@ -1606,6 +1608,12 @@ void put_char(int cx,   int cy, uint16_t ch) {
 }
 
 void put_str(const uint16_t* str) {
+    uint64_t char_height = config.font.char_height * config.scale;
+    uint64_t char_width = config.font.char_width * config.scale;
+    uint64_t rows = config.height / char_height;
+    uint64_t cols = config.width / char_width;
+    uint64_t char_row_offset = char_height * config.pitch;
+    
     for (; *str != 0; ++str) {
         uint16_t ch = *str;
 
@@ -1617,6 +1625,7 @@ void put_str(const uint16_t* str) {
                 cursor_y += 1;
                 break;
             default:
+                buffer[cursor_y][cursor_x] = ch;
                 put_char(cursor_x, cursor_y, ch);
                 cursor_x++;
                 break;
@@ -1627,9 +1636,17 @@ void put_str(const uint16_t* str) {
             cursor_x = 0;
             cursor_y += 1;
         }
-        if (cursor_y >= config.height / (config.font.char_height * config.scale))
+        if (cursor_y >= rows)
         {
-            memmove(config.address, config.address + config.font.char_height * config.scale * config.pitch, (config.height - config.font.char_height * config.scale) * config.pitch);
+            memmove(buffer[0], buffer[1], 128 * 63 * sizeof(uint16_t));
+            for (int y = 0; y < rows; ++y)
+            {
+                for (int x = 0; x < cols; ++x)
+                {
+                    put_char(x, y, buffer[y][x]);
+                }
+            }
+            cursor_y--;
         }
     }
 }

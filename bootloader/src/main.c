@@ -14,6 +14,9 @@
 #include "printf.h"
 #include "elf.h"
 #include "console.h"
+#include "cr3.h"
+#include "paging.h"
+#include "../../common/bootinfo.h"
 
 #define FOREACH(type, next, obj)        \
     {                                   \
@@ -70,13 +73,6 @@ void print_hex_(EFI_SYSTEM_TABLE *st, uint64_t num, int pad_num)
     print(st, ptr);
 }
 
-void loop(void)
-{
-    __asm__(
-        "mov $1, %rax\n"
-        "1337: cmp $1, %rax\n"
-        "je 1337b");
-}
 struct GI
 {
     EFI_GUID guid;
@@ -680,6 +676,27 @@ void print_serial(void *data, const uint16_t *str)
     serial_out->OutputString(serial_out, (uint16_t *)str);
 }
 
+void print_page_table(uint64_t *page_table, int level)
+{
+    for (int i = 0; i < 512; ++i)
+    {
+        if (page_table[i])
+        {
+            for (int j = 0; j < level; ++j)
+                printf(u"| ");
+            printf(u"%3d: %x\r\n", i, page_table[i]);
+            if (level < 3 && !(page_table[i] & (1 << 7)))
+            {
+                print_page_table((uint64_t *)(page_table[i] & 0x000FFFFFFFFFF000), level + 1);
+            }
+        }
+    }
+}
+
+#define PHYS_MEMMAP_ENTRY_COUNT 64
+struct PhysMemoryMapEntry physmemmap[PHYS_MEMMAP_ENTRY_COUNT];
+int physmemmap_count = 0;
+
 EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image_handle, IN EFI_SYSTEM_TABLE *system_table)
 {
     st = system_table;
@@ -846,6 +863,92 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image_handle, IN EFI_SYSTEM_TABLE *syst
     }
     printf(u"All loadable segments are non-overlapping\r\n");
 
+    st->BootServices->AllocatePages(AllocateAnyPages, EfiLoaderData, 1, &address);
+    uint64_t *pml4 = (uint64_t *)read_cr3();
+    memmove((void *)address, pml4, 4096);
+    pml4 = (uint64_t *)address;
+    write_cr3((uint64_t)pml4);
+    FOREACH(struct ProgramHeader, ph_next, program_header_iter(elf))
+    {
+        if (item->type == PT_LOAD)
+        {
+            uint64_t page_start = item->vaddr >> 12;
+            uint64_t page_end = (item->vaddr + item->memsz - 1) >> 12;
+            uint64_t page_size = page_end - page_start + 1;
+            EFI_PHYSICAL_ADDRESS address;
+            CALL(st->BootServices->AllocatePages(AllocateAnyPages, EfiLoaderData, page_size, &address), "Error allocating memory for kernel segment");
+            size_t skip = item->offset % 4096;
+            memmove((void *)address + skip, (void *)elf + item->offset, item->filesz);
+            memset((void *)address, 0, skip);
+            memset((void *)address + skip + item->filesz, 0, item->memsz - item->filesz);
+
+            printf(u"Page table address: %x\r\n", pml4);
+
+            for (uint64_t page = page_start, addr = address; page <= page_end; ++page, addr += 4096)
+            {
+                uint64_t l1 = page >> (9 * 3) & 0x1FF;
+                uint64_t l2 = page >> (9 * 2) & 0x1FF;
+                uint64_t l3 = page >> (9 * 1) & 0x1FF;
+                uint64_t l4 = page >> (9 * 0) & 0x1FF;
+                printf(u"%d-%d-%d-%d\r\n", l1, l2, l3, l4);
+                printf(u"PML4[%d] = %llx\r\n", l1, pml4[l1]);
+
+                uint64_t *map1 = pml4;
+                uint64_t *map2;
+                uint64_t *map3;
+                uint64_t *map4;
+
+                if (!map1[l1])
+                {
+                    st->BootServices->AllocatePages(AllocateAnyPages, EfiLoaderData, 1, (EFI_PHYSICAL_ADDRESS *)&map2);
+                    memset(map2, 0, 4096);
+                    map1[l1] = ((uint64_t)map2 & 0x000FFFFFFFFFF000) | 0x03;
+                }
+                else
+                {
+                    map2 = (uint64_t *)map1[l1];
+                }
+                if (!map2[l2])
+                {
+                    st->BootServices->AllocatePages(AllocateAnyPages, EfiLoaderData, 1, (EFI_PHYSICAL_ADDRESS *)&map3);
+                    memset(map3, 0, 4096);
+                    map2[l2] = ((uint64_t)map3 & 0x000FFFFFFFFFF000) | 0x03;
+                }
+                else
+                {
+                    map3 = (uint64_t *)map2[l2];
+                }
+                if (!map3[l3])
+                {
+                    st->BootServices->AllocatePages(AllocateAnyPages, EfiLoaderData, 1, (EFI_PHYSICAL_ADDRESS *)&map4);
+                    memset(map4, 0, 4096);
+                    map3[l3] = ((uint64_t)map4 & 0x000FFFFFFFFFF000) | 0x03;
+                }
+                else
+                {
+                    map4 = (uint64_t *)map3[l3];
+                }
+                map4[l4] = (addr & 0x000FFFFFFFFFF000) | 0x03;
+                printf(u"Mapped %#llx to %#llx\r\n", page << 12, addr);
+                printf(u"%llx: L4[%d] = %llx\r\n", map1, l1, map1[l1]);
+                printf(u"%llx: L3[%d] = %llx\r\n", map2, l2, map2[l2]);
+                printf(u"%llx: L2[%d] = %llx\r\n", map3, l3, map3[l3]);
+                printf(u"%llx: L1[%d] = %llx\r\n", map4, l4, map4[l4]);
+                printf(u"Tetsing mapping...\r\n");
+                uint8_t _ = *(uint8_t *)(page << 12);
+                printf(u"Mapping tested.\r\n");
+            }
+        }
+    }
+    ENDFOREACH
+
+    write_cr3((uint64_t)pml4);
+
+    uint64_t entry = elf->entry;
+    printf(u"Testing call to kernel entry %#llx...\r\n", entry);
+    int result = ((int (*)(void))entry)();
+    printf(u"Result was %d\r\n", result);
+
     {
         EFI_GUID protocol = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
         UINTN handle_count;
@@ -856,28 +959,11 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image_handle, IN EFI_SYSTEM_TABLE *syst
         EFI_GRAPHICS_OUTPUT_PROTOCOL *interface = NULL;
         CALL(st->BootServices->HandleProtocol(handles[0], &protocol, (void **)&interface), "Error opening GOP");
 
-        uint32_t max_mode = interface->Mode->MaxMode;
-        for (uint32_t i = 0; i < max_mode; ++i)
-        {
-            EFI_GRAPHICS_OUTPUT_MODE_INFORMATION info;
-            UINTN info_size = sizeof(info);
-            EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *ptr = &info;
-            CALL(interface->QueryMode(interface, i, &info_size, &ptr), "Error getting mode info");
-            printf(u"Mode %d:\r\n", i);
-            printf(u"  Resolution: %dx%d\r\n", ptr->HorizontalResolution, ptr->VerticalResolution);
-            printf(u"  Pixel format: %d\r\n", ptr->PixelFormat);
-            printf(u"  Bitmask: %.8x %.8x %.8x\r\n", ptr->PixelInformation.RedMask, ptr->PixelInformation.GreenMask, ptr->PixelInformation.BlueMask, ptr->PixelInformation.ReservedMask);
-            // st->ConIn->Reset(st->ConIn, false);
-            // st->BootServices->WaitForEvent(1, &st->ConIn->WaitForKey, NULL);
-        }
-
         printf(u"Switching to GOP console; press any key to continue...");
         st->ConIn->Reset(st->ConIn, false);
         st->BootServices->WaitForEvent(1, &st->ConIn->WaitForKey, NULL);
 
         init_console(interface);
-
-        printf(u"Testing...\r\nHello\r\n");
 
         st->BootServices->FreePool(handles);
     }
@@ -900,6 +986,59 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image_handle, IN EFI_SYSTEM_TABLE *syst
     UINTN memmap_entry_count = memmap_size / memmap_entry_size;
     EFI_MEMORY_DESCRIPTOR *entries = (EFI_MEMORY_DESCRIPTOR *)address;
     EFI_MEMORY_DESCRIPTOR *ptr = entries;
+
+    uint64_t start = 0;
+    cursor = 0;
+    enum PhysMemoryType type = PhysReserved;
+    for (int i = 0; i < memmap_entry_count; ++i, ptr = (EFI_MEMORY_DESCRIPTOR *)((void *)ptr + memmap_entry_size))
+    {
+        size_t cur_frame = ptr->PhysicalStart >> 12;
+        enum PhysMemoryType cur_type;
+        switch (ptr->Type)
+        {
+        case EfiConventionalMemory:
+            cur_type = PhysFree;
+            break;
+        default:
+            cur_type = PhysReserved;
+            break;
+        }
+
+        if (cur_frame == cursor)
+        {
+            if (cur_type == type)
+            {
+                cursor += ptr->NumberOfPages;
+            }
+            else
+            {
+                physmemmap[physmemmap_count].start_frame = start;
+                physmemmap[physmemmap_count].frame_count = cursor - start;
+                physmemmap[physmemmap_count].type = type;
+                physmemmap_count++;
+                start = cur_frame;
+                cursor = cur_frame + ptr->NumberOfPages;
+                type = cur_type;
+            }
+        }
+        else
+        {
+            physmemmap[physmemmap_count].start_frame = start;
+            physmemmap[physmemmap_count].frame_count = cursor - start;
+            physmemmap[physmemmap_count].type = type;
+            physmemmap_count++;
+            start = cur_frame;
+            cursor = cur_frame + ptr->NumberOfPages;
+            type = cur_type;
+        }
+
+        if (physmemmap_count >= PHYS_MEMMAP_ENTRY_COUNT)
+        {
+            ERR(u"Error creating physmemmap");
+        }
+    }
+
+    printf(u"PhysMemmapEntryCount: %d\r\n", physmemmap_count);
 
     wait_for_keypress_exit();
     return EFI_SUCCESS;

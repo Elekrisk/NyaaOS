@@ -3,7 +3,7 @@
 SHELL := bash
 
 bl_cc := clang
-bl_cflags := -O0 -g -I efi -target x86_64-pc-win32-coff -fno-stack-protector -fshort-wchar -mno-red-zone -Wall -Werror -Wno-error=unused-variable -Wno-error=incompatible-library-redeclaration -Wno-error=macro-redefined
+bl_cflags := -masm=intel -O0 -g -I efi -target x86_64-pc-win32-coff -fno-stack-protector -fshort-wchar -mno-red-zone -Wall -Werror -Wno-error=unused-variable -Wno-error=incompatible-library-redeclaration -Wno-error=macro-redefined
 bl_ld := lld-link
 bl_lflags := -debug:full -subsystem:efi_application -nodefaultlib -dll
 
@@ -21,6 +21,8 @@ k_src := $(shell find kernel/src/ -iname "*.c")
 k_obj :=$(k_src:kernel/src/%.c=kernel/obj/%.o)
 
 all: disk.img
+
+debug: disk-debug.img
 
 disk-debug.img: bootloader/bootloader-debug.efi kernel/kernel.elf
 	./mk_img.sh debug
@@ -52,7 +54,7 @@ kernel/obj/%.o: kernel/src/%.c
 run: all
 	qemu-system-x86_64 -enable-kvm -bios bios.bin disk.img 
 
-debug: disk-debug.img
+run-debug: debug
 	qemu-system-x86_64 -bios bios.bin disk-debug.img -s -S -serial tcp:localhost:12345,server
 
 copy-to-disk: bootloader/bootloader.efi kernel/kernel.elf
