@@ -1,0 +1,26 @@
+{
+    "files.associations": {
+        "uefi.h": "c",
+        "loadedimage.h": "c",
+        "loadfile.h": "c",
+        "fileinfo.h": "c",
+        "system_error": "c",
+        "array": "c",
+        "functional": "c",
+        "tuple": "c",
+        "type_traits": "c",
+        "utility": "c",
+        "cstring": "c",
+        "*.tcc": "c",
+        "algorithm": "c",
+        "partitioninfo.h": "c",
+        "console.h": "c",
+        "graphicsoutput.h": "c",
+        "cr3_": "c"
+    },
+    "lldb.launch.terminal": "integrated",
+    "lldb.launch.expressions": "native",
+    "lldb.showDisassembly": "auto",
+    "lldb.evaluateForHovers": false,
+    "lldb.launch.preRunCommands": []
+}
