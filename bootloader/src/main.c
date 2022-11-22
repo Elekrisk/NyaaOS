@@ -906,7 +906,7 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image_handle, IN EFI_SYSTEM_TABLE *syst
                 }
                 else
                 {
-                    map2 = (uint64_t *)map1[l1];
+                    map2 = (uint64_t *)(map1[l1] & 0x000FFFFFFFFFF000);
                 }
                 if (!map2[l2])
                 {
@@ -916,7 +916,7 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image_handle, IN EFI_SYSTEM_TABLE *syst
                 }
                 else
                 {
-                    map3 = (uint64_t *)map2[l2];
+                    map3 = (uint64_t *)(map2[l2] & 0x000FFFFFFFFFF000);
                 }
                 if (!map3[l3])
                 {
@@ -926,7 +926,7 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image_handle, IN EFI_SYSTEM_TABLE *syst
                 }
                 else
                 {
-                    map4 = (uint64_t *)map3[l3];
+                    map4 = (uint64_t *)(map3[l3] & 0x000FFFFFFFFFF000);
                 }
                 map4[l4] = (addr & 0x000FFFFFFFFFF000) | 0x03;
                 printf(u"Mapped %#llx to %#llx\r\n", page << 12, addr);
@@ -1039,6 +1039,8 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image_handle, IN EFI_SYSTEM_TABLE *syst
     }
 
     printf(u"PhysMemmapEntryCount: %d\r\n", physmemmap_count);
+
+    
 
     wait_for_keypress_exit();
     return EFI_SUCCESS;
